@@ -1,18 +1,36 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import pandas as pd
 import io
 import uuid
+import json
+import os
 
 # --- KONFIGURACE A PŘÍPRAVA DAT ---
 
 # Nastavení stránky Streamlit
 st.set_page_config(page_title="Tvorba rozvrhu", layout="wide")
 
+DATA_FILE = "rozvrh_data.json"
+
+def load_data():
+    '''Načte uložená data z JSON souboru.'''
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_data(data):
+    '''Uloží aktuální stav předmětů do JSON souboru.'''
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
 # Inicializace session_state pro ukládání předmětů
 if 'subjects' not in st.session_state:
-    st.session_state.subjects = []
+    st.session_state.subjects = load_data()
 
 # Konstanty
 DAYS = ["PO", "ÚT", "ST", "ČT", "PÁ"]
@@ -61,7 +79,7 @@ with st.sidebar.form(key="add_subject_form"):
         elif not name:
             st.sidebar.error("Zadejte název předmětu.")
         else:
-            st.session_state.subjects.append({
+            new_subject = {
                 "id": str(uuid.uuid4()),
                 "name": name,
                 "day": day,
@@ -69,8 +87,11 @@ with st.sidebar.form(key="add_subject_form"):
                 "start_time": start_time,
                 "end_time": end_time,
                 "room": room
-            })
+            }
+            st.session_state.subjects.append(new_subject)
+            save_data(st.session_state.subjects)
             st.sidebar.success(f"Předmět {name} přidán!")
+            st.rerun()
 
 # --- HLAVNÍ OBSAH: VIZUALIZACE A SPRÁVA ---
 st.title("Interaktivní školní rozvrh")
@@ -152,13 +173,43 @@ with col2:
     else:
         for index, sub in enumerate(st.session_state.subjects):
             with st.expander(f"{sub['name']} ({sub['day']} {sub['start_time']}-{sub['end_time']})", expanded=False):
-                st.write(f"**Typ:** {sub['type']}")
-                st.write(f"**Místnost:** {sub['room']}")
+                # Editační pole
+                edit_name = st.text_input("Název", value=sub['name'], key=f"name_{sub['id']}")
+                edit_day = st.selectbox("Den", DAYS, index=DAYS.index(sub['day']), key=f"day_{sub['id']}")
+                edit_type = st.selectbox("Typ", TYPES, index=TYPES.index(sub['type']), key=f"type_{sub['id']}")
                 
-                # Tlačítko pro odstranění
-                if st.button("🗑️ Smazat", key=f"del_{sub['id']}"):
-                    st.session_state.subjects.pop(index)
-                    st.rerun()
+                col_t1, col_t2 = st.columns(2)
+                with col_t1:
+                    edit_start = st.selectbox("Od", TIME_SLOTS[:-1], index=TIME_SLOTS[:-1].index(sub['start_time']), key=f"start_{sub['id']}")
+                with col_t2:
+                    edit_end = st.selectbox("Do", TIME_SLOTS[1:], index=TIME_SLOTS[1:].index(sub['end_time']), key=f"end_{sub['id']}")
+                
+                edit_room = st.text_input("Místnost", value=sub['room'], max_chars=10, key=f"room_{sub['id']}")
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("💾 Uložit změny", key=f"save_{sub['id']}"):
+                        if time_to_float(edit_start) >= time_to_float(edit_end):
+                            st.error("Čas 'do' musí být větší než čas 'od'!")
+                        else:
+                            # Aktualizace dat v poli
+                            st.session_state.subjects[index].update({
+                                "name": edit_name,
+                                "day": edit_day,
+                                "type": edit_type,
+                                "start_time": edit_start,
+                                "end_time": edit_end,
+                                "room": edit_room
+                            })
+                            save_data(st.session_state.subjects)
+                            st.success("Uloženo!")
+                            st.rerun()
+                
+                with col_btn2:
+                    if st.button("🗑️ Smazat", key=f"del_{sub['id']}"):
+                        st.session_state.subjects.pop(index)
+                        save_data(st.session_state.subjects)
+                        st.rerun()
 
 st.markdown("---")
 st.markdown("💡 **Legenda:** <span style='color:orange;font-weight:bold'>Přednáška</span> | <span style='color:limegreen;font-weight:bold'>Cvičení</span> | <span style='color:dodgerblue;font-weight:bold'>Proseminář</span>", unsafe_allow_html=True)
